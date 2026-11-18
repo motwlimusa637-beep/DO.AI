@@ -1,0 +1,199 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>DO.AI · Network data optimization</title>
+<style>
+  :root { --bg:#f6f7f9; --card:#fff; --ink:#1b1f24; --muted:#5d6670; --line:#e3e6ea; --accent:#5b3fd1; --good:#1f8a4c; --warn:#b26a00; --bad:#c62f2f; }
+  * { box-sizing:border-box; }
+  body { margin:0; font:14px/1.5 system-ui,-apple-system,"Segoe UI",Tahoma,sans-serif; background:var(--bg); color:var(--ink); }
+  header { display:flex; align-items:center; gap:16px; padding:14px 24px; background:var(--card); border-bottom:1px solid var(--line); flex-wrap:wrap; }
+  header h1 { font-size:18px; margin:0; }
+  header .sub { color:var(--muted); }
+  .pill { padding:2px 10px; border-radius:99px; background:#eef0f3; font-size:12px; }
+  .pill.on { background:#e5f4ea; color:var(--good); } .pill.off { background:#fbeaea; color:var(--bad); }
+  main { display:grid; grid-template-columns: 1fr 1fr; gap:16px; padding:16px 24px 40px; max-width:1400px; margin:auto; }
+  section { background:var(--card); border:1px solid var(--line); border-radius:10px; padding:16px; min-width:0; }
+  section.wide { grid-column: 1 / -1; }
+  h2 { font-size:15px; margin:0 0 10px; display:flex; justify-content:space-between; align-items:center; gap:8px; }
+  table { width:100%; border-collapse:collapse; font-size:13px; }
+  th, td { text-align:left; padding:6px 8px; border-bottom:1px solid var(--line); vertical-align:top; }
+  th { color:var(--muted); font-weight:600; }
+  td.num, th.num { text-align:right; font-variant-numeric:tabular-nums; }
+  button { font:inherit; padding:5px 12px; border-radius:6px; border:1px solid var(--line); background:#fff; cursor:pointer; }
+  button.primary { background:var(--accent); color:#fff; border-color:var(--accent); }
+  button.ok { color:var(--good); } button.no { color:var(--bad); }
+  button:disabled { opacity:.5; cursor:wait; }
+  .analysis { white-space:pre-wrap; background:#f8f7ff; border-left:3px solid var(--accent); padding:8px 12px; margin:6px 0; font-size:13px; unicode-bidi:plaintext; }
+  .muted { color:var(--muted); }
+  .risk-high { color:var(--bad); font-weight:600; } .risk-medium { color:var(--warn); } .risk-low { color:var(--good); }
+  textarea, input, select { font:inherit; padding:6px 8px; border:1px solid var(--line); border-radius:6px; }
+  textarea { width:100%; min-height:60px; unicode-bidi:plaintext; }
+  .row { display:flex; gap:8px; align-items:center; flex-wrap:wrap; }
+  a { color:var(--accent); cursor:pointer; }
+  svg text { font-size:11px; fill:var(--muted); }
+  .note { font-size:12px; color:var(--muted); margin-top:8px; }
+  @media (max-width: 900px) { main { grid-template-columns: 1fr; } }
+</style>
+</head>
+<body>
+<header>
+  <h1>DO.AI</h1><span class="sub">Network data optimization · proof of concept</span>
+  <span id="claude" class="pill">Claude: …</span>
+  <span id="stat" class="muted"></span>
+  <span style="flex:1"></span>
+  <button onclick="seed(this)">Load demo data</button>
+  <button onclick="detect(this)">Run detection</button>
+</header>
+<main>
+  <section>
+    <h2>Regions · last 24 hours</h2>
+    <table><thead><tr><th>Region</th><th class="num">Cells</th><th class="num">PRB avg %</th><th class="num">PRB max %</th><th class="num">DL Mbps</th><th class="num">Drop %</th><th class="num">Avail %</th></tr></thead><tbody id="regions"></tbody></table>
+  </section>
+
+  <section>
+    <h2>Ask the network data <span class="muted" style="font-weight:400">English or العربية</span></h2>
+    <textarea id="q" placeholder="e.g. Which 5 cells had the highest PRB utilization in the last 24 hours, and how did their throughput change?"></textarea>
+    <div class="row" style="margin-top:8px"><button class="primary" onclick="ask(this)">Ask Claude</button></div>
+    <div id="answer"></div>
+  </section>
+
+  <section class="wide">
+    <h2>Anomalies <span><a onclick="loadAnomalies()">refresh</a></span></h2>
+    <table><thead><tr><th>Time (UTC)</th><th>Cell</th><th>Type</th><th>KPI</th><th class="num">Value</th><th class="num">Peer median</th><th class="num">z</th><th>Status</th><th></th></tr></thead><tbody id="anoms"></tbody></table>
+  </section>
+
+  <section class="wide">
+    <h2>Cell trend <span class="muted" id="cellname" style="font-weight:400">click a cell above</span></h2>
+    <div id="chart"></div>
+  </section>
+
+  <section class="wide">
+    <h2>Recommendations · engineer approval <span><a onclick="exportCsv()">export approved (CSV)</a></span></h2>
+    <table><thead><tr><th>#</th><th>Cell</th><th>Action</th><th>Parameters</th><th>Rationale</th><th>Risk</th><th>Status</th><th></th></tr></thead><tbody id="recs"></tbody></table>
+    <p class="note">Nothing is applied to the network. Approved items are exported as change requests for stc's existing SON/OSS process.</p>
+  </section>
+
+  <section class="wide">
+    <h2>Upload KPI file</h2>
+    <div class="row">
+      <input type="file" id="file" accept=".csv,.parquet">
+      <select id="vendor"><option>ericsson</option><option>nokia</option><option>huawei</option><option>other</option></select>
+      <button onclick="upload(this)">Upload</button>
+    </div>
+    <div id="uploadout" class="note">Cell-level aggregates only. Files with subscriber identifiers (MSISDN, IMSI, IMEI, national ID) are rejected before storage.</div>
+  </section>
+</main>
+<script>
+let TOKEN = null;
+try { TOKEN = localStorage.getItem("doai_token"); } catch (e) {}
+const esc = s => String(s ?? "").replace(/[&<>"']/g, c => ({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[c]));
+const fmt = v => v == null ? "–" : (typeof v === "number" ? v.toLocaleString(undefined, {maximumFractionDigits: 2}) : esc(v));
+
+async function api(path, opts = {}) {
+  opts.headers = Object.assign({}, opts.headers || {}, TOKEN ? {"X-DOAI-Token": TOKEN} : {});
+  const r = await fetch(path, opts);
+  if (r.status === 401) {
+    TOKEN = prompt("DO.AI API token");
+    try { localStorage.setItem("doai_token", TOKEN); } catch (e) {}
+    return api(path, opts);
+  }
+  const body = r.headers.get("content-type")?.includes("json") ? await r.json() : await r.text();
+  if (!r.ok) throw new Error(body.detail || body || r.statusText);
+  return body;
+}
+
+async function busy(btn, fn) { btn.disabled = true; try { await fn(); } catch (e) { alert(e.message); } finally { btn.disabled = false; } }
+
+async function loadStatus() {
+  const s = await api("/api/status");
+  const c = document.getElementById("claude");
+  c.textContent = s.claude_enabled ? `Claude: on (${s.model})` : "Claude: off (set ANTHROPIC_API_KEY)";
+  c.className = "pill " + (s.claude_enabled ? "on" : "off");
+  document.getElementById("stat").textContent =
+    `${s.cells} cells · ${s.kpi_rows.toLocaleString()} KPI rows · latest ${s.latest_hour ? s.latest_hour.slice(0,16).replace("T"," ") : "–"} UTC · ${s.open_anomalies} open anomalies · ${s.pending_recommendations} pending`;
+}
+
+async function loadRegions() {
+  const rows = await api("/api/regions");
+  document.getElementById("regions").innerHTML = rows.map(r =>
+    `<tr><td>${esc(r.region)}</td><td class="num">${fmt(r.cells)}</td><td class="num">${fmt(r.prb)}</td><td class="num">${fmt(r.prb_max)}</td><td class="num">${fmt(r.dl)}</td><td class="num">${fmt(r.drop)}</td><td class="num">${fmt(r.avail)}</td></tr>`
+  ).join("") || `<tr><td colspan="7" class="muted">No data yet. Click “Load demo data”.</td></tr>`;
+}
+
+async function loadAnomalies() {
+  const rows = await api("/api/anomalies");
+  document.getElementById("anoms").innerHTML = rows.map(a => `
+    <tr><td>${esc(a.ts.slice(0,16).replace("T"," "))}</td><td><a onclick="showCell('${esc(a.cell_id)}')">${esc(a.cell_id)}</a></td><td class="${a.category === "fault" ? "risk-high" : "risk-medium"}">${esc(a.category)}</td><td>${esc(a.kpi)}</td>
+    <td class="num">${fmt(a.value)}</td><td class="num">${fmt(a.baseline)}</td><td class="num">${fmt(a.zscore)}</td><td>${esc(a.status)}</td>
+    <td>${a.status === "open" ? `<button class="primary" onclick="investigate(this, ${a.id})">Investigate with Claude</button>` : ""}</td></tr>
+    ${a.analysis ? `<tr><td colspan="9"><div class="analysis">${esc(a.analysis)}</div></td></tr>` : ""}`
+  ).join("") || `<tr><td colspan="9" class="muted">No anomalies.</td></tr>`;
+}
+
+async function loadRecs() {
+  const rows = await api("/api/recommendations");
+  document.getElementById("recs").innerHTML = rows.map(r => `
+    <tr><td>${r.id}</td><td><a onclick="showCell('${esc(r.cell_id)}')">${esc(r.cell_id)}</a></td><td>${esc(r.action)}</td>
+    <td><code>${esc(JSON.stringify(r.parameters))}</code></td>
+    <td style="max-width:420px">${esc(r.rationale)}${r.expected_impact ? `<div class="muted">Expected: ${esc(r.expected_impact)}</div>` : ""}</td>
+    <td class="risk-${esc(r.risk)}">${esc(r.risk)}</td>
+    <td>${esc(r.status)}${r.reviewer ? `<div class="muted">${esc(r.reviewer)}</div>` : ""}</td>
+    <td>${r.status === "pending" ? `<button class="ok" onclick="review(this, ${r.id}, 'approved')">Approve</button> <button class="no" onclick="review(this, ${r.id}, 'rejected')">Reject</button>` : ""}</td></tr>`
+  ).join("") || `<tr><td colspan="8" class="muted">No recommendations yet. Investigate an anomaly to get one.</td></tr>`;
+}
+
+async function showCell(id) {
+  const rows = await api(`/api/cells/${encodeURIComponent(id)}/kpis?hours=96`);
+  document.getElementById("cellname").textContent = `${id} · last 96 hours`;
+  const series = [["prb_util_pct","PRB %"],["dl_throughput_mbps","DL Mbps"],["drop_rate_pct","Drop %"],["availability_pct","Avail %"]];
+  const W = 1300, H = 90, pad = 40;
+  document.getElementById("chart").innerHTML = series.map(([k, label]) => {
+    const vals = rows.map(r => r[k]).filter(v => v != null);
+    if (!vals.length) return "";
+    const lo = Math.min(...vals), hi = Math.max(...vals), span = (hi - lo) || 1;
+    const pts = rows.map((r, i) => r[k] == null ? null : `${pad + i * (W - pad - 10) / Math.max(rows.length - 1, 1)},${8 + (1 - (r[k] - lo) / span) * (H - 16)}`).filter(Boolean).join(" ");
+    return `<svg viewBox="0 0 ${W} ${H}" width="100%" role="img" aria-label="${label}">
+      <text x="0" y="14">${label}</text><text x="0" y="${H - 4}">${fmt(lo)}–${fmt(hi)}</text>
+      <polyline points="${pts}" fill="none" stroke="#5b3fd1" stroke-width="1.5"/></svg>`;
+  }).join("");
+}
+
+async function investigate(btn, id) { await busy(btn, async () => { btn.textContent = "Claude is investigating…"; await api(`/api/anomalies/${id}/investigate`, {method:"POST"}); await refresh(); }); }
+async function review(btn, id, decision) {
+  const reviewer = prompt("Your name (recorded in the audit log)"); if (!reviewer) return;
+  const note = decision === "rejected" ? prompt("Reason (optional)") : null;
+  await busy(btn, async () => { await api(`/api/recommendations/${id}/review`, {method:"POST", headers:{"Content-Type":"application/json"}, body: JSON.stringify({decision, reviewer, note})}); await refresh(); });
+}
+async function ask(btn) {
+  const q = document.getElementById("q").value.trim(); if (!q) return;
+  await busy(btn, async () => {
+    document.getElementById("answer").innerHTML = `<p class="muted">Claude is working…</p>`;
+    const r = await api("/api/ask", {method:"POST", headers:{"Content-Type":"application/json"}, body: JSON.stringify({question: q})});
+    document.getElementById("answer").innerHTML = `<div class="analysis" dir="auto">${esc(r.answer)}</div><div class="note">${r.trace.length} tool call(s): ${r.trace.map(t => esc(t.tool)).join(", ")}</div>`;
+    loadRecs();
+  });
+}
+async function seed(btn) { if (!confirm("Replace all data with a fresh synthetic demo dataset?")) return; await busy(btn, async () => { await api("/api/seed", {method:"POST"}); await refresh(); }); }
+async function detect(btn) { await busy(btn, async () => { const r = await api("/api/detect", {method:"POST"}); await refresh(); alert(`${r.new_anomalies.length} new anomalies`); }); }
+async function upload(btn) {
+  const f = document.getElementById("file").files[0]; if (!f) return alert("Choose a file");
+  const fd = new FormData(); fd.append("file", f); fd.append("vendor", document.getElementById("vendor").value);
+  await busy(btn, async () => {
+    const out = document.getElementById("uploadout");
+    try { const r = await api("/api/ingest", {method:"POST", body: fd}); out.textContent = `Stored ${r.rows} rows. Mapped: ${Object.keys(r.mapped).length} columns. Learned by Claude: ${Object.keys(r.learned_by_claude).length}. Ignored: ${r.ignored_columns.join(", ") || "none"}.`; }
+    catch (e) { out.textContent = "Rejected: " + e.message; }
+    await refresh();
+  });
+}
+async function exportCsv() {
+  const r = await fetch("/api/recommendations/export.csv", {headers: TOKEN ? {"X-DOAI-Token": TOKEN} : {}});
+  if (!r.ok) return alert("Export failed: " + r.status);
+  const a = document.createElement("a"); a.href = URL.createObjectURL(await r.blob()); a.download = "approved_change_requests.csv"; a.click();
+}
+async function refresh() { await Promise.all([loadStatus(), loadRegions(), loadAnomalies(), loadRecs()]); }
+refresh().catch(e => console.error(e));
+</script>
+</body>
+</html>
