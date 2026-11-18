@@ -1,0 +1,16 @@
+[project]
+name = "doai"
+version = "0.1.0"
+description = "Claude-powered network data optimization platform (proof of concept)"
+requires-python = ">=3.11"
+
+[tool.ruff]
+line-length = 150
+target-version = "py311"
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "B", "UP"]
+ignore = ["B008"]  # FastAPI Depends()/File() in defaults is the documented pattern
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
