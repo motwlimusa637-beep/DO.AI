@@ -1,0 +1,12 @@
+__pycache__/
+*.pyc
+.venv/
+venv/
+.env
+*.db
+.pytest_cache/
+.ruff_cache/
+# Never commit real network or customer data. Only synthetic samples live in data/samples.
+data/*
+!data/samples/
+!data/README.md
